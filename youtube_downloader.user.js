@@ -99,7 +99,7 @@
     return bootstrapPromise;
   }
 
-  function request(method, url, data, timeout = 10000, hasRetried = false) {
+  function request(method, url, data, timeout = 10000, hasRetried = false, networkRetryCount = 0) {
     return new Promise((resolve, reject) => {
       const token = loadConfig().token;
       gmRequest({
@@ -131,8 +131,24 @@
             reject(new Error((parsed && parsed.error) || `HTTP ${resp.status}`));
           }
         },
-        ontimeout: () => reject(new Error('请求超时：本地后端未响应')),
-        onerror: () => reject(new Error('连接失败：请确认本地后端已启动')),
+        ontimeout: () => {
+          if (networkRetryCount < 2) {
+            setTimeout(() => {
+              request(method, url, data, timeout, hasRetried, networkRetryCount + 1).then(resolve).catch(reject);
+            }, 250 * (networkRetryCount + 1));
+            return;
+          }
+          reject(new Error('请求超时：本地后端未响应'));
+        },
+        onerror: () => {
+          if (networkRetryCount < 2) {
+            setTimeout(() => {
+              request(method, url, data, timeout, hasRetried, networkRetryCount + 1).then(resolve).catch(reject);
+            }, 250 * (networkRetryCount + 1));
+            return;
+          }
+          reject(new Error('连接失败：请确认本地后端已启动'));
+        },
       });
     });
   }

@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.local.yt-downloader</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/dama/Projects-Dev/YT_Downloader/.venv/bin/python</string>
+    <string>/Users/dama/Projects-Dev/YT_Downloader/app.py</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/dama/Projects-Dev/YT_Downloader</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>IDLE_TIMEOUT_SECONDS</key>
+    <string>900</string>
+  </dict>
+
+  <key>Sockets</key>
+  <dict>
+    <key>Listeners</key>
+    <dict>
+      <key>SockNodeName</key>
+      <string>127.0.0.1</string>
+      <key>SockServiceName</key>
+      <string>5000</string>
+      <key>SockType</key>
+      <string>stream</string>
+      <key>SockFamily</key>
+      <string>IPv4</string>
+    </dict>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/com.local.yt-downloader.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/com.local.yt-downloader.err.log</string>
+</dict>
+</plist>

@@ -86,6 +86,16 @@ macOS 一键启动（双击文件）：
 2. 脚本会自动加载 `.env` 并执行 `uv run python app.py`
 3. 终端窗口中按 `Ctrl+C` 停止服务
 
+macOS 按需唤醒（推荐）：
+
+1. 双击 `install_launchagent.command`
+2. 脚本会把 `launchd/com.local.yt-downloader.plist` 安装到 `~/Library/LaunchAgents/`
+3. 之后油猴脚本首次访问 `http://127.0.0.1:5000` 时会触发 launchd 自动拉起后端
+4. 后端在没有任务后会等待 `IDLE_TIMEOUT_SECONDS`，默认 900 秒，然后自动退出
+5. 如果你移动了仓库路径，记得同步修改 plist 里的 `WorkingDirectory`
+
+卸载方式：执行 `launchctl bootout gui/$UID ~/Library/LaunchAgents/com.local.yt-downloader.plist`
+
 ## 4. 安装油猴脚本
 
 1. 安装 Tampermonkey。

@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import ctypes
 import json
 import os
 import queue
 import re
+import signal
 import subprocess
 import sys
 import threading
@@ -14,10 +16,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
+import time
 
 from flask import Flask, Response, jsonify, request
 from flask_cors import CORS
 from dotenv import load_dotenv
+from werkzeug.serving import make_server
 
 
 load_dotenv()
@@ -54,6 +58,11 @@ CORS(
 
 LOCAL_TOKEN = os.getenv("LOCAL_API_TOKEN", "change-me-local-token")
 MAX_CONCURRENT_WORKERS = int(os.getenv("MAX_CONCURRENT_WORKERS", "1"))
+BACKEND_HOST = os.getenv("BACKEND_HOST", "127.0.0.1")
+BACKEND_PORT = int(os.getenv("BACKEND_PORT", "5000"))
+IDLE_TIMEOUT_SECONDS = int(os.getenv("IDLE_TIMEOUT_SECONDS", "900"))
+IDLE_CHECK_INTERVAL_SECONDS = int(os.getenv("IDLE_CHECK_INTERVAL_SECONDS", "15"))
+LAUNCHD_SOCKET_NAME = os.getenv("LAUNCHD_SOCKET_NAME", "Listeners")
 DOWNLOAD_DIR = Path(os.getenv("DOWNLOAD_DIR", "~/Downloads/YouTube")).expanduser().resolve()
 JOB_STORE_PATH = Path(os.getenv("JOB_STORE_PATH", "./.data/jobs.json")).expanduser().resolve()
 YTDLP_COOKIES_FROM_BROWSER = os.getenv("YTDLP_COOKIES_FROM_BROWSER", "").strip()
@@ -77,6 +86,97 @@ JOBS: dict[str, dict[str, Any]] = {}
 JOBS_LOCK = threading.Lock()
 ACTIVE_PROCESSES: dict[str, subprocess.Popen[str]] = {}
 ACTIVE_PROCESSES_LOCK = threading.Lock()
+LAST_ACTIVITY_MONOTONIC = time.monotonic()
+LAST_ACTIVITY_LOCK = threading.Lock()
+IDLE_WATCHDOG_STOP = threading.Event()
+
+
+def touch_activity() -> None:
+    global LAST_ACTIVITY_MONOTONIC
+    with LAST_ACTIVITY_LOCK:
+        LAST_ACTIVITY_MONOTONIC = time.monotonic()
+
+
+def seconds_since_last_activity() -> float:
+    with LAST_ACTIVITY_LOCK:
+        return time.monotonic() - LAST_ACTIVITY_MONOTONIC
+
+
+def has_active_work() -> bool:
+    with JOBS_LOCK:
+        if any(job.get("status") in {"queued", "running", "merging"} for job in JOBS.values()):
+            return True
+
+    with ACTIVE_PROCESSES_LOCK:
+        if ACTIVE_PROCESSES:
+            return True
+
+    return not JOB_QUEUE.empty()
+
+
+def idle_watchdog_loop() -> None:
+    while not IDLE_WATCHDOG_STOP.wait(IDLE_CHECK_INTERVAL_SECONDS):
+        if has_active_work():
+            continue
+
+        if seconds_since_last_activity() < IDLE_TIMEOUT_SECONDS:
+            continue
+
+        try:
+            save_jobs_to_disk()
+        except Exception:
+            pass
+
+        os.kill(os.getpid(), signal.SIGTERM)
+        return
+
+
+def start_idle_watchdog() -> None:
+    thread = threading.Thread(target=idle_watchdog_loop, name="idle-watchdog", daemon=True)
+    thread.start()
+
+
+def launchd_socket_fd(socket_name: str) -> int | None:
+    try:
+        libc = ctypes.CDLL(None)
+        launch_activate_socket = libc.launch_activate_socket
+    except AttributeError:
+        return None
+
+    launch_activate_socket.argtypes = [
+        ctypes.c_char_p,
+        ctypes.POINTER(ctypes.POINTER(ctypes.c_int)),
+        ctypes.POINTER(ctypes.c_size_t),
+    ]
+    launch_activate_socket.restype = ctypes.c_int
+
+    fds_ptr = ctypes.POINTER(ctypes.c_int)()
+    fds_count = ctypes.c_size_t()
+    error_code = launch_activate_socket(socket_name.encode("utf-8"), ctypes.byref(fds_ptr), ctypes.byref(fds_count))
+    if error_code != 0 or fds_count.value == 0:
+        return None
+
+    try:
+        sockets = [fds_ptr[index] for index in range(fds_count.value)]
+    finally:
+        try:
+            libc.free.argtypes = [ctypes.c_void_p]
+            libc.free.restype = None
+            libc.free(fds_ptr)
+        except Exception:
+            pass
+
+    return sockets[0]
+
+
+def create_server() -> Any:
+    launchd_fd = launchd_socket_fd(LAUNCHD_SOCKET_NAME)
+    if launchd_fd is not None:
+        print(f"Using launchd socket activation on {BACKEND_HOST}:{BACKEND_PORT}")
+        return make_server(BACKEND_HOST, BACKEND_PORT, APP, threaded=True, fd=launchd_fd)
+
+    print(f"Using direct bind on http://{BACKEND_HOST}:{BACKEND_PORT}")
+    return make_server(BACKEND_HOST, BACKEND_PORT, APP, threaded=True)
 
 
 def save_jobs_to_disk() -> None:
@@ -188,6 +288,7 @@ def update_job(job_id: str, **fields: Any) -> None:
             return
         JOBS[job_id].update(fields)
     save_jobs_to_disk()
+    touch_activity()
 
 
 def classify_error(stderr_text: str) -> str:
@@ -480,6 +581,9 @@ def health() -> Any:
             "status": "ok",
             "download_dir": str(DOWNLOAD_DIR),
             "job_store_path": str(JOB_STORE_PATH),
+            "backend_host": BACKEND_HOST,
+            "backend_port": BACKEND_PORT,
+            "idle_timeout_seconds": IDLE_TIMEOUT_SECONDS,
             "yt_dlp_found": bool(shutil_which("yt-dlp")),
             "ffmpeg_found": bool(shutil_which("ffmpeg")),
             "workers": MAX_CONCURRENT_WORKERS,
@@ -548,6 +652,7 @@ def create_job() -> Any:
     with JOBS_LOCK:
         JOBS[job_id] = job
     save_jobs_to_disk()
+    touch_activity()
 
     JOB_QUEUE.put(job_id)
     return jsonify({"job_id": job_id, "status": "queued", "mode": mode, "quality": quality}), 202
@@ -731,7 +836,19 @@ def start_workers() -> None:
         thread.start()
 
 
-if __name__ == "__main__":
+def run_backend() -> None:
     load_jobs_from_disk()
     start_workers()
-    APP.run(host="127.0.0.1", port=5000, debug=False)
+    start_idle_watchdog()
+    touch_activity()
+
+    server = create_server()
+    try:
+        server.serve_forever()
+    finally:
+        IDLE_WATCHDOG_STOP.set()
+        server.server_close()
+
+
+if __name__ == "__main__":
+    run_backend()
