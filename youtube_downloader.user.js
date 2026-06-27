@@ -11,7 +11,7 @@
 (function () {
   'use strict';
 
-  const API_BASE = 'http://127.0.0.1:5000';
+  const API_BASE = 'http://127.0.0.1:5050';
   const BOOTSTRAP_URL = `${API_BASE}/auth/bootstrap?client=yt-userscript-v1`;
   const DEFAULT_LOCAL_TOKEN = 'change-me-local-token';
   const BTN_ID = 'yt-local-downloader-btn';

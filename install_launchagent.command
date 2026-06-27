@@ -24,7 +24,7 @@ launchctl bootout "gui/$UID" "$TARGET_PLIST" >/dev/null 2>&1 || true
 launchctl bootstrap "gui/$UID" "$TARGET_PLIST"
 
 echo "LaunchAgent installed: $TARGET_PLIST"
-echo "On-demand wakeup is active. The backend will start when localhost:5000 is accessed."
+echo "On-demand wakeup is active. The backend will start when localhost:5050 is accessed."
 echo "To remove it later, run: launchctl bootout gui/$UID $TARGET_PLIST"
 echo
 read "_input?Press Enter to close..."

@@ -19,7 +19,7 @@ if ! command -v uv >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "Starting backend on http://127.0.0.1:5000 ..."
+echo "Starting backend on http://127.0.0.1:5050 ..."
 echo "Press Ctrl+C to stop."
 echo
 
