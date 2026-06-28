@@ -3,7 +3,8 @@
 // @namespace    https://local.dev/
 // @version      1.1.0
 // @description  Submit YouTube download jobs to local backend and track progress.
-// @match        https://www.youtube.com/watch*
+// @match        https://www.youtube.com/*
+// @match        https://m.youtube.com/*
 // @grant        GM_xmlhttpRequest
 // @connect      127.0.0.1
 // ==/UserScript==
@@ -17,11 +18,15 @@
   const BTN_ID = 'yt-local-downloader-btn';
   const DASHBOARD_BTN_ID = 'yt-local-downloader-dashboard-btn';
   const CONFIG_KEY = 'yt-local-downloader-config-v1';
+  const INJECTION_RETRY_DELAY_MS = 150;
+  const INJECTION_MAX_RETRIES = 40;
 
   let pollTimer = null;
   let lastUrl = location.href;
   let bootstrapPromise = null;
   let activeProgressModal = null;
+  let buttonRetryTimer = null;
+  let buttonRetryCount = 0;
 
   function loadConfig() {
     const fallback = { mode: 'video', quality: 'best', token: DEFAULT_LOCAL_TOKEN };
@@ -757,10 +762,19 @@
     return btn;
   }
 
+  function clearButtonRetryTimer() {
+    if (buttonRetryTimer) {
+      clearTimeout(buttonRetryTimer);
+      buttonRetryTimer = null;
+    }
+  }
+
   function findHostContainer() {
     const selectors = [
       '#top-row #owner',
       'ytd-watch-metadata #owner',
+      'ytd-video-secondary-info-renderer #owner',
+      '#secondary #owner',
       '#above-the-fold #top-row',
     ];
     for (const selector of selectors) {
@@ -774,17 +788,17 @@
 
   function ensureButton() {
     if (!location.pathname.startsWith('/watch')) {
-      return;
+      return false;
     }
 
     const existing = document.getElementById(BTN_ID);
     if (existing) {
-      return;
+      return true;
     }
 
     const host = findHostContainer();
     if (!host) {
-      return;
+      return false;
     }
 
     const wrapper = document.createElement('div');
@@ -794,32 +808,80 @@
     wrapper.appendChild(makeButton());
     wrapper.appendChild(makeDashboardButton());
     host.appendChild(wrapper);
+    return true;
+  }
+
+  function scheduleEnsureButton(delay = 0, resetRetryCount = false, replaceExisting = false) {
+    if (resetRetryCount) {
+      buttonRetryCount = 0;
+    }
+
+    if (buttonRetryTimer && !replaceExisting) {
+      return;
+    }
+
+    clearButtonRetryTimer();
+    buttonRetryTimer = setTimeout(() => {
+      buttonRetryTimer = null;
+
+      if (ensureButton()) {
+        buttonRetryCount = 0;
+        return;
+      }
+
+      if (!location.pathname.startsWith('/watch')) {
+        buttonRetryCount = 0;
+        return;
+      }
+
+      if (document.getElementById(BTN_ID)) {
+        buttonRetryCount = 0;
+        return;
+      }
+
+      if (buttonRetryCount >= INJECTION_MAX_RETRIES) {
+        return;
+      }
+
+      buttonRetryCount += 1;
+      scheduleEnsureButton(INJECTION_RETRY_DELAY_MS);
+    }, delay);
   }
 
   function setupSpaHooks() {
-    const observer = new MutationObserver(() => {
-      ensureButton();
-    });
-    observer.observe(document.documentElement, {
-      childList: true,
-      subtree: true,
-    });
+    const attachObserver = () => {
+      const root = document.documentElement;
+      if (!root) {
+        document.addEventListener('DOMContentLoaded', attachObserver, { once: true });
+        return;
+      }
+
+      const observer = new MutationObserver(() => {
+        scheduleEnsureButton(100);
+      });
+      observer.observe(root, {
+        childList: true,
+        subtree: true,
+      });
+    };
+
+    attachObserver();
 
     setInterval(() => {
       if (lastUrl !== location.href) {
         lastUrl = location.href;
         clearPolling();
-        ensureButton();
+        scheduleEnsureButton(0, true, true);
       }
     }, 800);
 
     document.addEventListener('yt-navigate-finish', () => {
       clearPolling();
-      setTimeout(ensureButton, 100);
+      scheduleEnsureButton(50, true, true);
     });
   }
 
-  ensureButton();
+  scheduleEnsureButton(0, true, true);
   alignTokenFromBackend(false);
   setupSpaHooks();
 })();

@@ -171,3 +171,33 @@ macOS 按需唤醒（推荐）：
 ## 7. 合规提示
 
 请仅在符合法律法规、平台条款与版权要求的前提下使用本项目。
+
+## 8. 自动化按钮渲染测试
+
+本仓库提供一个 Playwright 烟雾测试，用来检查脚本是否能在 YouTube watch 页渲染按钮。
+
+先安装依赖：
+
+```bash
+uv sync
+```
+
+默认运行离线 fixture，验证按钮是否能在延迟出现的 watch DOM 上成功渲染：
+
+```bash
+uv run python tools/youtube_button_smoke_test.py
+```
+
+如果要直接测真实 YouTube 页面：
+
+```bash
+uv run python tools/youtube_button_smoke_test.py --mode live
+```
+
+可选参数：
+
+1. `--url`：指定真实视频地址
+2. `--headed`：显示浏览器窗口，便于观察页面状态
+3. `CHROME_PATH`：手动指定 Chrome 可执行文件路径
+
+脚本会自动优先使用 macOS 上已安装的 Google Chrome；如果没有找到，会提示下一步怎么处理。
