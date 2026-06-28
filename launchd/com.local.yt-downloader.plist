@@ -7,12 +7,12 @@
 
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/dama/Projects-Dev/YT_Downloader/.venv/bin/python</string>
-    <string>/Users/dama/Projects-Dev/YT_Downloader/app.py</string>
+    <string>__PROJECT_DIR__/.venv/bin/python</string>
+    <string>__PROJECT_DIR__/app.py</string>
   </array>
 
   <key>WorkingDirectory</key>
-  <string>/Users/dama/Projects-Dev/YT_Downloader</string>
+  <string>__PROJECT_DIR__</string>
 
   <key>EnvironmentVariables</key>
   <dict>

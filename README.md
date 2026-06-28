@@ -1,5 +1,7 @@
 # YouTube Downloader (Local)
 
+当前项目仅适用于 macOS 用户。
+
 本项目包含两部分：
 
 1. 前端油猴脚本 `youtube_downloader.user.js`
@@ -16,11 +18,13 @@
 
 ## 1. AI agent 自动化配置
 
+当前自动化配置流程仅针对 macOS 环境。
+
 把下面提示词直接发给具备终端和文件编辑能力的 AI agent，即可让它完成首次配置。
 
 ### 目标
 
-让 agent 完成以下事项：
+让 agent 在 macOS 上完成以下事项：
 
 1. 检查 macOS 是否已安装 `uv`、Python 3.11、`ffmpeg`
 2. 缺失时给出最小安装动作，优先使用 Homebrew
@@ -60,7 +64,7 @@
 
 ## 2. Manual 手动配置
 
-不使用 AI agent 时，按下面顺序手动完成即可。
+当前手动配置流程也仅适用于 macOS。不使用 AI agent 时，按下面顺序完成即可。
 
 ### 第 1 步：准备系统依赖
 
