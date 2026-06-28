@@ -43,6 +43,23 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def parse_iso(ts: str | None) -> datetime | None:
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(ts)
+    except Exception:
+        return None
+
+
+def diff_ms(start_ts: str | None, end_ts: str | None) -> int | None:
+    start = parse_iso(start_ts)
+    end = parse_iso(end_ts)
+    if not start or not end:
+        return None
+    return max(0, int((end - start).total_seconds() * 1000))
+
+
 APP = Flask(__name__)
 CORS(
     APP,
@@ -259,6 +276,13 @@ def dashboard_token_ok(req: Any) -> bool:
 
 
 def job_snapshot(job: dict[str, Any]) -> dict[str, Any]:
+    created_at = job.get("created_at")
+    worker_picked_at = job.get("worker_picked_at")
+    started_at = job.get("started_at")
+    yt_dlp_spawned_at = job.get("yt_dlp_spawned_at")
+    first_output_at = job.get("first_output_at")
+    first_progress_at = job.get("first_progress_at")
+
     return {
         "job_id": job["job_id"],
         "url": job["url"],
@@ -270,9 +294,21 @@ def job_snapshot(job: dict[str, Any]) -> dict[str, Any]:
         "message": job["message"],
         "output": job["output"],
         "error": job["error"],
-        "created_at": job["created_at"],
-        "started_at": job["started_at"],
+        "created_at": created_at,
+        "worker_picked_at": worker_picked_at,
+        "started_at": started_at,
+        "yt_dlp_spawned_at": yt_dlp_spawned_at,
+        "first_output_at": first_output_at,
+        "first_progress_at": first_progress_at,
         "ended_at": job["ended_at"],
+        "timing": {
+            "queue_wait_ms": diff_ms(created_at, worker_picked_at),
+            "worker_to_running_ms": diff_ms(worker_picked_at, started_at),
+            "running_to_spawn_ms": diff_ms(started_at, yt_dlp_spawned_at),
+            "spawn_to_first_output_ms": diff_ms(yt_dlp_spawned_at, first_output_at),
+            "spawn_to_first_progress_ms": diff_ms(yt_dlp_spawned_at, first_progress_at),
+            "created_to_first_progress_ms": diff_ms(created_at, first_progress_at),
+        },
     }
 
 
@@ -388,7 +424,7 @@ def run_download_job(job_id: str) -> None:
         job_id,
         status="running",
         progress=0,
-        message=f"downloading ({mode}/{normalized_quality})",
+        message=f"resolving metadata ({mode}/{normalized_quality})",
         quality=normalized_quality,
         started_at=now_iso(),
     )
@@ -398,6 +434,7 @@ def run_download_job(job_id: str) -> None:
         *yt_dlp_cmd_prefix(),
         "--newline",
         "--no-color",
+        "--no-playlist",
         "--retries",
         "1",
         "-f",
@@ -447,14 +484,21 @@ def run_download_job(job_id: str) -> None:
                 bufsize=1,
             )
 
+            update_job(job_id, yt_dlp_spawned_at=now_iso())
+
             with ACTIVE_PROCESSES_LOCK:
                 ACTIVE_PROCESSES[job_id] = process
 
             assert process.stdout is not None
+            first_output_recorded = False
+            first_progress_recorded = False
             for line in process.stdout:
                 text = line.strip()
                 if not text:
                     continue
+                if not first_output_recorded:
+                    first_output_recorded = True
+                    update_job(job_id, first_output_at=now_iso())
                 tail.append(text)
 
                 with JOBS_LOCK:
@@ -473,6 +517,9 @@ def run_download_job(job_id: str) -> None:
                 if match:
                     pct = match.group(1).replace(",", ".")
                     value = min(100, max(0, int(float(pct))))
+                    if not first_progress_recorded:
+                        first_progress_recorded = True
+                        update_job(job_id, first_progress_at=now_iso())
                     update_job(job_id, progress=value, message="downloading")
 
             return_code = process.wait()
@@ -563,6 +610,7 @@ def worker_loop() -> None:
     while True:
         job_id = JOB_QUEUE.get()
         try:
+            update_job(job_id, worker_picked_at=now_iso())
             run_download_job(job_id)
         finally:
             JOB_QUEUE.task_done()
@@ -570,6 +618,7 @@ def worker_loop() -> None:
 
 @APP.get("/health")
 def health() -> Any:
+    touch_activity()
     return jsonify(
         {
             "status": "ok",
@@ -595,6 +644,7 @@ def health() -> Any:
 @APP.get("/auth/bootstrap")
 def auth_bootstrap() -> Any:
     # Local bootstrap endpoint for userscript token auto-alignment.
+    touch_activity()
     client = (request.args.get("client") or "").strip()
     if client != "yt-userscript-v1":
         return jsonify({"error": "invalid_client"}), 400
@@ -656,6 +706,7 @@ def create_job() -> Any:
 def list_jobs() -> Any:
     if not token_ok(request):
         return jsonify({"error": "unauthorized"}), 401
+    touch_activity()
 
     limit_raw = request.args.get("limit", "50")
     try:
@@ -674,6 +725,7 @@ def list_jobs() -> Any:
 def get_job(job_id: str) -> Any:
     if not token_ok(request):
         return jsonify({"error": "unauthorized"}), 401
+    touch_activity()
 
     with JOBS_LOCK:
         job = JOBS.get(job_id)

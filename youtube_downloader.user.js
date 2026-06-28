@@ -28,6 +28,7 @@
   let buttonRetryTimer = null;
   let buttonRetryCount = 0;
   let apiBasePromise = null;
+  let keepaliveTimer = null;
 
   function normalizeApiBase(base) {
     if (typeof base !== 'string') return '';
@@ -93,6 +94,41 @@
     });
   }
 
+  function probeApiBaseFirstAvailable(candidates) {
+    return new Promise((resolve) => {
+      if (!candidates.length) {
+        resolve('');
+        return;
+      }
+
+      let finished = false;
+      let remaining = candidates.length;
+
+      for (const base of candidates) {
+        probeApiBase(base)
+          .then((resolved) => {
+            if (finished) return;
+            if (resolved) {
+              finished = true;
+              resolve(resolved);
+              return;
+            }
+            remaining -= 1;
+            if (remaining === 0) {
+              resolve('');
+            }
+          })
+          .catch(() => {
+            if (finished) return;
+            remaining -= 1;
+            if (remaining === 0) {
+              resolve('');
+            }
+          });
+      }
+    });
+  }
+
   async function resolveApiBase(force = false) {
     if (!force && apiBasePromise) {
       return apiBasePromise;
@@ -100,12 +136,10 @@
 
     apiBasePromise = (async () => {
       const candidates = buildApiBaseCandidates();
-      for (const base of candidates) {
-        const resolved = await probeApiBase(base);
-        if (resolved) {
-          saveApiBase(resolved);
-          return resolved;
-        }
+      const resolved = await probeApiBaseFirstAvailable(candidates);
+      if (resolved) {
+        saveApiBase(resolved);
+        return resolved;
       }
       return candidates[0] || 'http://127.0.0.1:5050';
     })();
@@ -143,6 +177,34 @@
       throw new Error('GM_xmlhttpRequest is not available');
     }
     fn(options);
+  }
+
+  function pingBackendHealth() {
+    resolveApiBase()
+      .then((apiBase) => {
+        gmRequest({
+          method: 'GET',
+          url: `${apiBase}/health`,
+          timeout: 1200,
+          onload: () => {},
+          ontimeout: () => {},
+          onerror: () => {},
+        });
+      })
+      .catch(() => {});
+  }
+
+  function startBackendKeepalive() {
+    if (keepaliveTimer) {
+      return;
+    }
+    pingBackendHealth();
+    keepaliveTimer = setInterval(() => {
+      if (!location.pathname.startsWith('/watch')) {
+        return;
+      }
+      pingBackendHealth();
+    }, 45000);
   }
 
   async function alignTokenFromBackend(force = false) {
@@ -716,7 +778,17 @@
     alert(hint);
   }
 
-  async function pollJob(jobId, btn, progressModal) {
+  function getPollDelayMs(status, pollCount) {
+    if (pollCount < 2) {
+      return 500;
+    }
+    if (status === 'queued') {
+      return 800;
+    }
+    return 1000;
+  }
+
+  async function pollJob(jobId, btn, progressModal, pollCount = 0) {
     try {
       const result = await request('GET', `/jobs/${jobId}`);
       if (!result || !result.status) {
@@ -726,7 +798,8 @@
       if (result.status === 'queued') {
         setButtonState(btn, 'running', '排队中...');
         if (progressModal) progressModal.update('任务排队中...', result.progress);
-        pollTimer = setTimeout(() => pollJob(jobId, btn, progressModal), 1200);
+        const delay = getPollDelayMs('queued', pollCount);
+        pollTimer = setTimeout(() => pollJob(jobId, btn, progressModal, pollCount + 1), delay);
         return;
       }
 
@@ -742,7 +815,8 @@
             progress,
           );
         }
-        pollTimer = setTimeout(() => pollJob(jobId, btn, progressModal), 1200);
+        const delay = getPollDelayMs(result.status, pollCount);
+        pollTimer = setTimeout(() => pollJob(jobId, btn, progressModal, pollCount + 1), delay);
         return;
       }
 
@@ -978,5 +1052,6 @@
   scheduleEnsureButton(0, true, true);
   resolveApiBase(false);
   alignTokenFromBackend(false);
+  startBackendKeepalive();
   setupSpaHooks();
 })();
