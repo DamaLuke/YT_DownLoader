@@ -12,9 +12,9 @@
 (function () {
   'use strict';
 
-  const API_BASE = 'http://127.0.0.1:5050';
-  const BOOTSTRAP_URL = `${API_BASE}/auth/bootstrap?client=yt-userscript-v1`;
   const DEFAULT_LOCAL_TOKEN = 'change-me-local-token';
+  const API_BASE_CANDIDATES = ['http://127.0.0.1:5050', 'http://127.0.0.1:5000'];
+  const API_BASE_KEY = 'yt-local-downloader-api-base-v1';
   const BTN_ID = 'yt-local-downloader-btn';
   const DASHBOARD_BTN_ID = 'yt-local-downloader-dashboard-btn';
   const CONFIG_KEY = 'yt-local-downloader-config-v1';
@@ -27,6 +27,91 @@
   let activeProgressModal = null;
   let buttonRetryTimer = null;
   let buttonRetryCount = 0;
+  let apiBasePromise = null;
+
+  function normalizeApiBase(base) {
+    if (typeof base !== 'string') return '';
+    const trimmed = base.trim().replace(/\/$/, '');
+    return /^https?:\/\/127\.0\.0\.1:\d+$/.test(trimmed) ? trimmed : '';
+  }
+
+  function loadSavedApiBase() {
+    try {
+      return normalizeApiBase(localStorage.getItem(API_BASE_KEY) || '');
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function saveApiBase(base) {
+    try {
+      const normalized = normalizeApiBase(base);
+      if (normalized) {
+        localStorage.setItem(API_BASE_KEY, normalized);
+      }
+    } catch (_) {
+    }
+  }
+
+  function buildApiBaseCandidates() {
+    const seen = new Set();
+    const candidates = [];
+    const add = (base) => {
+      const normalized = normalizeApiBase(base);
+      if (!normalized || seen.has(normalized)) return;
+      seen.add(normalized);
+      candidates.push(normalized);
+    };
+
+    add(loadSavedApiBase());
+    for (const base of API_BASE_CANDIDATES) {
+      add(base);
+    }
+    return candidates;
+  }
+
+  function probeApiBase(base) {
+    return new Promise((resolve) => {
+      try {
+        gmRequest({
+          method: 'GET',
+          url: `${base}/health`,
+          timeout: 1800,
+          onload: (resp) => {
+            if (resp.status < 200 || resp.status >= 300) {
+              resolve('');
+              return;
+            }
+            resolve(base);
+          },
+          ontimeout: () => resolve(''),
+          onerror: () => resolve(''),
+        });
+      } catch (_) {
+        resolve('');
+      }
+    });
+  }
+
+  async function resolveApiBase(force = false) {
+    if (!force && apiBasePromise) {
+      return apiBasePromise;
+    }
+
+    apiBasePromise = (async () => {
+      const candidates = buildApiBaseCandidates();
+      for (const base of candidates) {
+        const resolved = await probeApiBase(base);
+        if (resolved) {
+          saveApiBase(resolved);
+          return resolved;
+        }
+      }
+      return candidates[0] || 'http://127.0.0.1:5050';
+    })();
+
+    return apiBasePromise;
+  }
 
   function loadConfig() {
     const fallback = { mode: 'video', quality: 'best', token: DEFAULT_LOCAL_TOKEN };
@@ -60,101 +145,107 @@
     fn(options);
   }
 
-  function alignTokenFromBackend(force = false) {
+  async function alignTokenFromBackend(force = false) {
     if (!force && bootstrapPromise) {
       return bootstrapPromise;
     }
 
-    bootstrapPromise = new Promise((resolve) => {
-      try {
+    bootstrapPromise = (async () => {
+      const apiBase = await resolveApiBase();
+      const bootstrapUrl = `${apiBase}/auth/bootstrap?client=yt-userscript-v1`;
+      return new Promise((resolve) => {
+        try {
+          gmRequest({
+            method: 'GET',
+            url: bootstrapUrl,
+            timeout: 4000,
+            onload: (resp) => {
+              if (resp.status < 200 || resp.status >= 300) {
+                resolve(false);
+                return;
+              }
+              let parsed = null;
+              try {
+                parsed = resp.responseText ? JSON.parse(resp.responseText) : null;
+              } catch (_) {
+                parsed = null;
+              }
+              const token = parsed && typeof parsed.token === 'string' ? parsed.token.trim() : '';
+              if (!token) {
+                resolve(false);
+                return;
+              }
+              const current = loadConfig();
+              if (current.token !== token) {
+                saveConfig({ ...current, token });
+              }
+              resolve(true);
+            },
+            ontimeout: () => resolve(false),
+            onerror: () => resolve(false),
+          });
+        } catch (_) {
+          resolve(false);
+        }
+      });
+    })();
+
+    return bootstrapPromise;
+  }
+
+  async function request(method, path, data, timeout = 10000, hasRetried = false, networkRetryCount = 0) {
+    return new Promise((resolve, reject) => {
+      resolveApiBase().then((apiBase) => {
+        const token = loadConfig().token;
         gmRequest({
-          method: 'GET',
-          url: BOOTSTRAP_URL,
-          timeout: 4000,
-          onload: (resp) => {
-            if (resp.status < 200 || resp.status >= 300) {
-              resolve(false);
-              return;
-            }
+          method,
+          url: `${apiBase}${path}`,
+          timeout,
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Local-Token': token,
+          },
+          data: data ? JSON.stringify(data) : undefined,
+          onload: async (resp) => {
             let parsed = null;
             try {
               parsed = resp.responseText ? JSON.parse(resp.responseText) : null;
             } catch (_) {
               parsed = null;
             }
-            const token = parsed && typeof parsed.token === 'string' ? parsed.token.trim() : '';
-            if (!token) {
-              resolve(false);
-              return;
+            if (resp.status === 401 && !hasRetried) {
+              const aligned = await alignTokenFromBackend(true);
+              if (aligned) {
+                request(method, path, data, timeout, true).then(resolve).catch(reject);
+                return;
+              }
             }
-            const current = loadConfig();
-            if (current.token !== token) {
-              saveConfig({ ...current, token });
+            if (resp.status >= 200 && resp.status < 300) {
+              resolve(parsed);
+            } else {
+              reject(new Error((parsed && parsed.error) || `HTTP ${resp.status}`));
             }
-            resolve(true);
           },
-          ontimeout: () => resolve(false),
-          onerror: () => resolve(false),
-        });
-      } catch (_) {
-        resolve(false);
-      }
-    });
-
-    return bootstrapPromise;
-  }
-
-  function request(method, url, data, timeout = 10000, hasRetried = false, networkRetryCount = 0) {
-    return new Promise((resolve, reject) => {
-      const token = loadConfig().token;
-      gmRequest({
-        method,
-        url,
-        timeout,
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Local-Token': token,
-        },
-        data: data ? JSON.stringify(data) : undefined,
-        onload: async (resp) => {
-          let parsed = null;
-          try {
-            parsed = resp.responseText ? JSON.parse(resp.responseText) : null;
-          } catch (_) {
-            parsed = null;
-          }
-          if (resp.status === 401 && !hasRetried) {
-            const aligned = await alignTokenFromBackend(true);
-            if (aligned) {
-              request(method, url, data, timeout, true).then(resolve).catch(reject);
+          ontimeout: () => {
+            if (networkRetryCount < 2) {
+              setTimeout(() => {
+                request(method, path, data, timeout, hasRetried, networkRetryCount + 1).then(resolve).catch(reject);
+              }, 250 * (networkRetryCount + 1));
               return;
             }
-          }
-          if (resp.status >= 200 && resp.status < 300) {
-            resolve(parsed);
-          } else {
-            reject(new Error((parsed && parsed.error) || `HTTP ${resp.status}`));
-          }
-        },
-        ontimeout: () => {
-          if (networkRetryCount < 2) {
-            setTimeout(() => {
-              request(method, url, data, timeout, hasRetried, networkRetryCount + 1).then(resolve).catch(reject);
-            }, 250 * (networkRetryCount + 1));
-            return;
-          }
-          reject(new Error('请求超时：本地后端未响应'));
-        },
-        onerror: () => {
-          if (networkRetryCount < 2) {
-            setTimeout(() => {
-              request(method, url, data, timeout, hasRetried, networkRetryCount + 1).then(resolve).catch(reject);
-            }, 250 * (networkRetryCount + 1));
-            return;
-          }
-          reject(new Error('连接失败：请确认本地后端已启动'));
-        },
-      });
+            reject(new Error('请求超时：本地后端未响应'));
+          },
+          onerror: () => {
+            if (networkRetryCount < 2) {
+              setTimeout(() => {
+                request(method, path, data, timeout, hasRetried, networkRetryCount + 1).then(resolve).catch(reject);
+              }, 250 * (networkRetryCount + 1));
+              return;
+            }
+            reject(new Error('连接失败：请确认本地后端已启动'));
+          },
+        });
+      }).catch((err) => reject(err));
     });
   }
 
@@ -627,7 +718,7 @@
 
   async function pollJob(jobId, btn, progressModal) {
     try {
-      const result = await request('GET', `${API_BASE}/jobs/${jobId}`);
+      const result = await request('GET', `/jobs/${jobId}`);
       if (!result || !result.status) {
         throw new Error('状态响应无效');
       }
@@ -689,7 +780,7 @@
     const title = (titleNode && titleNode.textContent ? titleNode.textContent.trim() : document.title) || '';
 
     try {
-      const created = await request('POST', `${API_BASE}/jobs`, {
+      const created = await request('POST', '/jobs', {
         url,
         title,
         mode: config.mode,
@@ -708,8 +799,9 @@
     }
   }
 
-  function openDashboard() {
-    const url = `${API_BASE}/dashboard?token=${encodeURIComponent(loadConfig().token)}`;
+  async function openDashboard() {
+    const apiBase = await resolveApiBase();
+    const url = `${apiBase}/dashboard?token=${encodeURIComponent(loadConfig().token)}`;
     window.open(url, '_blank', 'noopener,noreferrer');
   }
 
@@ -758,7 +850,9 @@
     btn.style.cursor = 'pointer';
     btn.style.background = '#f1faee';
     btn.style.color = '#1d3557';
-    btn.addEventListener('click', openDashboard);
+    btn.addEventListener('click', () => {
+      openDashboard().catch((err) => alert(err.message || '无法打开面板'));
+    });
     return btn;
   }
 
@@ -882,6 +976,7 @@
   }
 
   scheduleEnsureButton(0, true, true);
+  resolveApiBase(false);
   alignTokenFromBackend(false);
   setupSpaHooks();
 })();

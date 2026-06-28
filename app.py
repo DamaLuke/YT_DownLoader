@@ -10,22 +10,33 @@ import signal
 import subprocess
 import sys
 import threading
-import secrets
 import uuid
 from collections import deque
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 import time
 
 from flask import Flask, Response, jsonify, request
 from flask_cors import CORS
-from dotenv import load_dotenv
 from werkzeug.serving import make_server
-
-
-load_dotenv()
+from config import (
+    BACKEND_HOST,
+    BACKEND_PORT,
+    DOWNLOAD_DIR,
+    IDLE_CHECK_INTERVAL_SECONDS,
+    IDLE_TIMEOUT_SECONDS,
+    JOB_STORE_PATH,
+    LAUNCHD_SOCKET_NAME,
+    LOCAL_TOKEN,
+    MAX_CONCURRENT_WORKERS,
+    YTDLP_ACCEPT_LANGUAGE,
+    YTDLP_COOKIES_FILE,
+    YTDLP_COOKIES_FROM_BROWSER,
+    YTDLP_REFERER,
+    YTDLP_REMOTE_COMPONENTS,
+    YTDLP_USER_AGENT,
+)
 
 
 def now_iso() -> str:
@@ -56,34 +67,6 @@ CORS(
         },
     },
 )
-
-LOCAL_TOKEN_PLACEHOLDER = "change-me-local-token"
-
-
-def generate_local_token() -> str:
-    token = os.getenv("LOCAL_API_TOKEN", "").strip()
-    if token and token != LOCAL_TOKEN_PLACEHOLDER:
-        return token
-    return secrets.token_urlsafe(32)
-
-
-LOCAL_TOKEN = generate_local_token()
-MAX_CONCURRENT_WORKERS = int(os.getenv("MAX_CONCURRENT_WORKERS", "1"))
-BACKEND_HOST = os.getenv("BACKEND_HOST", "127.0.0.1")
-BACKEND_PORT = int(os.getenv("BACKEND_PORT", "5050"))
-IDLE_TIMEOUT_SECONDS = int(os.getenv("IDLE_TIMEOUT_SECONDS", "900"))
-IDLE_CHECK_INTERVAL_SECONDS = int(os.getenv("IDLE_CHECK_INTERVAL_SECONDS", "15"))
-LAUNCHD_SOCKET_NAME = os.getenv("LAUNCHD_SOCKET_NAME", "Listeners")
-DOWNLOAD_DIR = Path(os.getenv("DOWNLOAD_DIR", "~/Downloads/YouTube")).expanduser().resolve()
-JOB_STORE_PATH = Path(os.getenv("JOB_STORE_PATH", "./.data/jobs.json")).expanduser().resolve()
-YTDLP_COOKIES_FROM_BROWSER = os.getenv("YTDLP_COOKIES_FROM_BROWSER", "").strip()
-YTDLP_COOKIES_FILE = os.getenv("YTDLP_COOKIES_FILE", "").strip()
-YTDLP_USER_AGENT = os.getenv("YTDLP_USER_AGENT", "").strip()
-YTDLP_ACCEPT_LANGUAGE = os.getenv("YTDLP_ACCEPT_LANGUAGE", "").strip()
-YTDLP_REFERER = os.getenv("YTDLP_REFERER", "").strip()
-YTDLP_REMOTE_COMPONENTS = os.getenv("YTDLP_REMOTE_COMPONENTS", "ejs:github").strip()
-DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
-JOB_STORE_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 ALLOWED_HOSTS = {
     "youtube.com",

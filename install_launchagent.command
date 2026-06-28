@@ -16,15 +16,32 @@ fi
 SOURCE_PLIST="$SCRIPT_DIR/launchd/com.local.yt-downloader.plist"
 TARGET_DIR="$HOME/Library/LaunchAgents"
 TARGET_PLIST="$TARGET_DIR/com.local.yt-downloader.plist"
+BACKEND_PORT="$(uv run python -c 'from config import BACKEND_PORT; print(BACKEND_PORT)')"
 
 mkdir -p "$TARGET_DIR"
 cp "$SOURCE_PLIST" "$TARGET_PLIST"
+
+python3 - "$TARGET_PLIST" "$BACKEND_PORT" <<'PY'
+from pathlib import Path
+import sys
+
+plist_path = Path(sys.argv[1])
+backend_port = sys.argv[2]
+content = plist_path.read_text(encoding='utf-8')
+old = """<key>SockServiceName</key>
+  <string>__BACKEND_PORT__</string>"""
+new = f"""<key>SockServiceName</key>
+  <string>{backend_port}</string>"""
+if old not in content:
+    raise SystemExit('Could not locate SockServiceName in plist')
+plist_path.write_text(content.replace(old, new), encoding='utf-8')
+PY
 
 launchctl bootout "gui/$UID" "$TARGET_PLIST" >/dev/null 2>&1 || true
 launchctl bootstrap "gui/$UID" "$TARGET_PLIST"
 
 echo "LaunchAgent installed: $TARGET_PLIST"
-echo "On-demand wakeup is active. The backend will start when localhost:5050 is accessed."
+echo "On-demand wakeup is active. The backend will start when localhost:$BACKEND_PORT is accessed."
 echo "To remove it later, run: launchctl bootout gui/$UID $TARGET_PLIST"
 echo
 read "_input?Press Enter to close..."

@@ -54,26 +54,15 @@ uv pip install -r requirements.txt
 
 ## 3. 启动后端
 
+后端配置现在集中在 `config.py`，`app.py` 会直接导入这些变量。`.env` 仍然会被兼容读取，但它不再是主要的配置入口。
+
 默认情况下不需要手动设置 `LOCAL_API_TOKEN`，后端启动后会自动生成随机 token，油猴脚本会通过 `/auth/bootstrap` 自动对齐。
 
-如果你想固定 token 便于调试，也可以手动设置：
-
-```bash
-export LOCAL_API_TOKEN="your-fixed-token"
-uv run python app.py
-```
-
-也可以复制环境模板后加载，但通常不需要写入 `LOCAL_API_TOKEN`：
-
-```bash
-cp .env.example .env
-set -a && source .env && set +a
-uv run python app.py
-```
+如果你想固定 token 便于调试，也可以在 `config.py` 对应项里改，或者继续用 `.env` 覆盖。
 
 默认监听：
 
-1. `http://127.0.0.1:5050`
+1. `http://127.0.0.1:5050`，除非你在 `config.py` 里改了 `BACKEND_PORT`
 2. 下载目录：`~/Downloads/YouTube`
 3. 任务存储：`./.data/jobs.json`（可通过 `JOB_STORE_PATH` 改）
 
@@ -87,7 +76,7 @@ macOS 按需唤醒（推荐）：
 
 1. 双击 `install_launchagent.command`
 2. 脚本会把 `launchd/com.local.yt-downloader.plist` 安装到 `~/Library/LaunchAgents/`
-3. 之后油猴脚本首次访问 `http://127.0.0.1:5050` 时会触发 launchd 自动拉起后端
+3. 之后油猴脚本会自动探测本机可用端口并触发 launchd 拉起后端
 4. 后端在没有任务后会等待 `IDLE_TIMEOUT_SECONDS`，默认 900 秒，然后自动退出
 5. 如果你移动了仓库路径，记得同步修改 plist 里的 `WorkingDirectory`
 

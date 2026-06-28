@@ -5,12 +5,6 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-if [[ -f ".env" ]]; then
-  set -a
-  source .env
-  set +a
-fi
-
 if ! command -v uv >/dev/null 2>&1; then
   echo "Error: uv is not installed or not in PATH."
   echo "Install uv first, then run this file again."
@@ -19,7 +13,7 @@ if ! command -v uv >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "Starting backend on http://127.0.0.1:5050 ..."
+echo "Starting backend on http://127.0.0.1:$(uv run python -c 'from config import BACKEND_PORT; print(BACKEND_PORT)') ..."
 echo "Press Ctrl+C to stop."
 echo
 

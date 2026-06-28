@@ -29,7 +29,7 @@
       <key>SockNodeName</key>
       <string>127.0.0.1</string>
       <key>SockServiceName</key>
-      <string>5050</string>
+      <string>__BACKEND_PORT__</string>
       <key>SockType</key>
       <string>stream</string>
       <key>SockFamily</key>
