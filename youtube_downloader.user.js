@@ -16,7 +16,6 @@
   const API_BASE_CANDIDATES = ['http://127.0.0.1:5050', 'http://127.0.0.1:5000'];
   const API_BASE_KEY = 'yt-local-downloader-api-base-v1';
   const BTN_ID = 'yt-local-downloader-btn';
-  const DASHBOARD_BTN_ID = 'yt-local-downloader-dashboard-btn';
   const CONFIG_KEY = 'yt-local-downloader-config-v1';
   const INJECTION_RETRY_DELAY_MS = 150;
   const INJECTION_MAX_RETRIES = 40;
@@ -873,12 +872,6 @@
     }
   }
 
-  async function openDashboard() {
-    const apiBase = await resolveApiBase();
-    const url = `${apiBase}/dashboard?token=${encodeURIComponent(loadConfig().token)}`;
-    window.open(url, '_blank', 'noopener,noreferrer');
-  }
-
   function makeButton() {
     const btn = document.createElement('button');
     btn.id = BTN_ID;
@@ -907,26 +900,6 @@
       });
     });
 
-    return btn;
-  }
-
-  function makeDashboardButton() {
-    const btn = document.createElement('button');
-    btn.id = DASHBOARD_BTN_ID;
-    btn.type = 'button';
-    btn.textContent = '面板';
-    btn.style.marginLeft = '8px';
-    btn.style.padding = '8px 10px';
-    btn.style.border = '1px solid #1d3557';
-    btn.style.borderRadius = '20px';
-    btn.style.fontWeight = '700';
-    btn.style.fontSize = '12px';
-    btn.style.cursor = 'pointer';
-    btn.style.background = '#f1faee';
-    btn.style.color = '#1d3557';
-    btn.addEventListener('click', () => {
-      openDashboard().catch((err) => alert(err.message || '无法打开面板'));
-    });
     return btn;
   }
 
@@ -974,7 +947,6 @@
     wrapper.style.alignItems = 'center';
     wrapper.style.marginLeft = '12px';
     wrapper.appendChild(makeButton());
-    wrapper.appendChild(makeDashboardButton());
     host.appendChild(wrapper);
     return true;
   }
