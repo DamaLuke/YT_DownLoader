@@ -12,6 +12,7 @@
 3. 清晰度支持：`best` / `1080` / `720` / `480`
 4. 任务列表查询与取消
 5. 本地 Dashboard：`/dashboard?token=<LOCAL_API_TOKEN>`
+6. 启动时自动生成本地 token，并通过 `/auth/bootstrap` 与油猴脚本自动对齐
 
 ## 1. 环境要求
 
@@ -53,20 +54,16 @@ uv pip install -r requirements.txt
 
 ## 3. 启动后端
 
-建议先设置本地 token（必须与油猴脚本"设置"里填写的 Token 保持一致）：
+默认情况下不需要手动设置 `LOCAL_API_TOKEN`，后端启动后会自动生成随机 token，油猴脚本会通过 `/auth/bootstrap` 自动对齐。
 
-可先生成一个随机 token：
-
-```bash
-openssl rand -hex 24
-```
+如果你想固定 token 便于调试，也可以手动设置：
 
 ```bash
-export LOCAL_API_TOKEN="change-me-local-token"
+export LOCAL_API_TOKEN="your-fixed-token"
 uv run python app.py
 ```
 
-也可以复制环境模板后加载：
+也可以复制环境模板后加载，但通常不需要写入 `LOCAL_API_TOKEN`：
 
 ```bash
 cp .env.example .env
@@ -101,7 +98,7 @@ macOS 按需唤醒（推荐）：
 1. 安装 Tampermonkey。
 2. 新建脚本并粘贴 `youtube_downloader.user.js` 全部内容。
 3. 打开任意 YouTube 播放页，标题区域将出现下载按钮。
-4. 点击 "设置"，填写 Token（值必须等于 `LOCAL_API_TOKEN`），并设置下载模式/清晰度。
+4. 点击 "设置"，脚本会自动从后端对齐 Token；如后端使用固定 `LOCAL_API_TOKEN`，脚本也会自动同步。
 5. 使用 "面板" 按钮可打开本地任务监控页。
 
 ## 5. API
@@ -162,7 +159,7 @@ macOS 按需唤醒（推荐）：
 ## 6. 常见问题
 
 1. `unauthorized`：检查 token 是否一致。
-2. 脚本重装后忘记 token：重新点 "设置" 填写即可（脚本会保存到浏览器 localStorage）。
+2. 脚本重装后或后端重启：重新点 "设置" 即可自动重新对齐（脚本会保存到浏览器 localStorage）。
 3. `yt_dlp_found=false`：先安装 yt-dlp（项目依赖安装后应自动可用）。
 4. `ffmpeg_found=false`：确认 ffmpeg 已安装并在 PATH 中。
 5. `invalid_or_unsupported_url`：当前只允许 YouTube 域名。

@@ -10,6 +10,7 @@ import signal
 import subprocess
 import sys
 import threading
+import secrets
 import uuid
 from collections import deque
 from datetime import datetime, timezone
@@ -56,7 +57,17 @@ CORS(
     },
 )
 
-LOCAL_TOKEN = os.getenv("LOCAL_API_TOKEN", "change-me-local-token")
+LOCAL_TOKEN_PLACEHOLDER = "change-me-local-token"
+
+
+def generate_local_token() -> str:
+    token = os.getenv("LOCAL_API_TOKEN", "").strip()
+    if token and token != LOCAL_TOKEN_PLACEHOLDER:
+        return token
+    return secrets.token_urlsafe(32)
+
+
+LOCAL_TOKEN = generate_local_token()
 MAX_CONCURRENT_WORKERS = int(os.getenv("MAX_CONCURRENT_WORKERS", "1"))
 BACKEND_HOST = os.getenv("BACKEND_HOST", "127.0.0.1")
 BACKEND_PORT = int(os.getenv("BACKEND_PORT", "5050"))
@@ -256,11 +267,11 @@ def normalize_youtube_video_url(url: str) -> str | None:
     return f"https://www.youtube.com/watch?v={video_id}"
 
 
-def token_ok(req: request) -> bool:
+def token_ok(req: Any) -> bool:
     return req.headers.get("X-Local-Token", "") == LOCAL_TOKEN
 
 
-def dashboard_token_ok(req: request) -> bool:
+def dashboard_token_ok(req: Any) -> bool:
     return req.args.get("token", "") == LOCAL_TOKEN
 
 
